@@ -153,6 +153,11 @@ res <- microbenchmark(
 					readDelimNoColClasses={o <- readDelimNoColClasses(file, nlines)},
 					readDelimNoRowNoColClasses={o <- readDelimNoRowNoColClasses(file)},
 					fread={o <- fread(file)},
+					sqdf={
+						f <- file(file)
+						o <- sqldf("select * from f", dbname = tempfile(),
+											 file.format=list(header=TRUE, row.names=FALSE, sep="\t"))
+					},
 					times=20L)
 
 p <- ggplot(res) + geom_boxplot(aes(x=expr, y=time))

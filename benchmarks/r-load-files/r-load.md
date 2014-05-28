@@ -14,6 +14,10 @@ library(ggplot2)
 library(data.table)
 ```
 
+```
+## data.table 1.9.2  For help type: help("data.table")
+```
+
 ## Create Test Data
 
 For our benchmarking, we'll create a file that's in a format similar to the
@@ -154,8 +158,37 @@ res <- microbenchmark(
 					readDelimNoColClasses={o <- readDelimNoColClasses(file, nlines)},
 					readDelimNoRowNoColClasses={o <- readDelimNoRowNoColClasses(file)},
 					fread={o <- fread(file)},
+					sqdf={
+						f <- file(file)
+						o <- sqldf("select * from f", dbname = tempfile(),
+											 file.format=list(header=TRUE, row.names=FALSE, sep="\t"))
+					},
 					times=20L)
+```
 
+```
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 4 (fake-hapmap.txt)
+## Warning: closing unused connection 6 (fake-hapmap.txt)
+```
+
+```r
 p <- ggplot(res) + geom_boxplot(aes(x=expr, y=time))
 p + theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
