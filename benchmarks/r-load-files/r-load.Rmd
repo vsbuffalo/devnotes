@@ -1,0 +1,163 @@
+---
+title: Benchmarking Loading HapMap-like Data into R
+output:
+pdf_document:
+  toc: false
+  highlight: zenburn
+---
+
+```{r}
+library(rmarkdown)
+library(microbenchmark)
+library(ggplot2)
+library(data.table)
+```
+
+## Create Test Data
+
+For our benchmarking, we'll create a file that's in a format similar to the
+HapMap format: a wide data format where many individuals' genotypes are
+represented as columns. These data are mostly character (genotypes like A, T,
+Y, or A/T), so in the tests we have the choice to read in as factors or
+character vectors.
+
+```{r}
+nrows <- 1000L
+ngeno <- 2500L
+
+createFakeHapMap <- function(file, nrows, ngeno, nchr=12L, max_pos=1000000L) {
+	pos <- data.frame(id=paste0("id_", seq_len(nrows)),
+										chr=paste0("chr", sample(seq_len(nchr), nrows, replace=TRUE)),
+										pos=as.integer(runif(nrows, 0, max_pos)))
+	pos <- pos[order(pos$chr, pos$pos), ]
+	geno <- do.call(cbind, lapply(seq_len(ngeno),
+																function(x) {
+																	rep("N", nrows)
+																}))
+	colnames(geno) <- paste0("ind_", seq_len(ngeno))
+	out <- cbind(pos, geno)
+	write.table(out, file, sep="\t", quote=FALSE,
+							row.names=FALSE, col.names=TRUE)
+}
+file <- "fake-hapmap.txt"
+gzfile <- paste0(file, ".gz")
+createFakeHapMap(file, nrows, ngeno)
+gzcmd <- sprintf("gzip -c %s > %s", file, gzfile)
+system(gzcmd)
+
+```
+
+## Test Functions for Loading
+
+We benchmark a few functions:
+
+ - `readDelimFactor`: `read.delim` with `colClasses` and `nrows` set, reading
+	 in genotypes as a factor.
+
+ - `readDelimChar`: `read.delim` with `colClasses` and `nrows` set, reading in
+	 genotypes as a character vector.
+
+ - `readDelimNoRow`: `read.delim` with `colClasses` but not `nrows` set,
+	 reading in genotypes as a character vector.
+
+ - `readDelimNoColClasses`: `read.delim` without `colClasses` but with `nrows` set,
+	 reading in genotypes as a character vector.
+
+ - `readDelimNoRowNoColClasses`: `read.delim` without `colClasses` and `nrows` set,
+	 reading in genotypes as a character vector.
+
+ - `fread`: from the `data.table` package. This is very fast, but unfortunately
+	 can't read gzipped files.
+
+```{r}
+
+HAPMAP_FIXED_COLS_CHAR  <- c(rs="character",
+														 chrom="character", pos="integer")
+
+HAPMAP_FIXED_COLS_FACTOR <- c(rs="character",
+															chrom="factor", pos="integer")
+
+readDelimFactor <- function(file, nlines) {
+	header <- names(read.delim(file, header=TRUE, nrows=1))
+	samples <- header[-c(1:length(HAPMAP_FIXED_COLS_FACTOR))]
+
+	# create colclasses
+	colclasses <- c(HAPMAP_FIXED_COLS_FACTOR, rep("factor", length(samples)))
+	hapmap <- read.delim(file, header=TRUE, stringsAsFactors=FALSE,
+											 colClasses=colclasses, nrows=nlines,
+											 col.names=c(HAPMAP_FIXED_COLS_FACTOR, samples))
+	return(hapmap)
+}
+
+readDelimChar <- function(file, nlines) {
+	header <- names(read.delim(file, header=TRUE, nrows=1))
+	samples <- header[-c(1:length(HAPMAP_FIXED_COLS_CHAR))]
+
+	# create colclasses
+	colclasses <- c(HAPMAP_FIXED_COLS_CHAR, rep("character", length(samples)))
+	hapmap <- read.delim(file, header=TRUE, stringsAsFactors=FALSE,
+											 colClasses=colclasses, nrows=nlines,
+											 col.names=c(HAPMAP_FIXED_COLS_CHAR, samples))
+	return(hapmap)
+}
+
+# don't use nrow=
+readDelimNoRow <- function(file) {
+	header <- names(read.delim(file, header=TRUE, nrows=1))
+	samples <- header[-c(1:length(HAPMAP_FIXED_COLS_CHAR))]
+
+	# create colclasses
+	colclasses <- c(HAPMAP_FIXED_COLS_CHAR, rep("character", length(samples)))
+	hapmap <- read.delim(file, header=TRUE, stringsAsFactors=FALSE,
+											 colClasses=colclasses,
+											 col.names=c(HAPMAP_FIXED_COLS_CHAR, samples))
+	return(hapmap)
+}
+
+readDelimNoColClasses <- function(file, nlines) {
+	header <- names(read.delim(file, header=TRUE, nrows=1))
+	samples <- header[-c(1:length(HAPMAP_FIXED_COLS_CHAR))]
+
+	# create colclasses
+	colclasses <- c(HAPMAP_FIXED_COLS_CHAR, rep("character", length(samples)))
+	hapmap <- read.delim(file, header=TRUE, stringsAsFactors=FALSE,
+											 nrows=nlines,
+											 col.names=c(HAPMAP_FIXED_COLS_CHAR, samples))
+	return(hapmap)
+}
+
+
+readDelimNoRowNoColClasses <- function(file) {
+	header <- names(read.delim(file, header=TRUE, nrows=1))
+	samples <- header[-c(1:length(HAPMAP_FIXED_COLS_FACTOR))]
+
+	# create colclasses
+	hapmap <- read.delim(file, header=TRUE, stringsAsFactors=FALSE,
+											 col.names=c(HAPMAP_FIXED_COLS_FACTOR, samples))
+	return(hapmap)
+}
+
+```
+
+## Benchmarks
+
+```{r}
+nlines <- nrows + 1L
+file <- "fake-hapmap.txt"
+
+res <- microbenchmark(
+					readDelimFactor={o <- readDelimFactor(file, nlines)},
+					readDelimFactorGzip={o <- readDelimFactor(gzfile, nlines)},
+					readDelimChar={o <- readDelimChar(gzfile, nlines)},
+					readDelimNoRow={o <- readDelimNoRow(file)},
+					readDelimNoColClasses={o <- readDelimNoColClasses(file, nlines)},
+					readDelimNoRowNoColClasses={o <- readDelimNoRowNoColClasses(file)},
+					fread={o <- fread(file)},
+					times=20L)
+
+p <- ggplot(res) + geom_boxplot(aes(x=expr, y=time))
+p + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
