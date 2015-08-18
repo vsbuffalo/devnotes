@@ -11,6 +11,7 @@ library(rmarkdown)
 library(microbenchmark)
 library(ggplot2)
 library(data.table)
+library(rhdf5)
 ```
 
 ## Create Test Data
@@ -35,13 +36,26 @@ createFakeHapMap <- function(file, nrows, ngeno, nchr=12L, max_pos=1000000L) {
 																	rep("N", nrows)
 																}))
 	colnames(geno) <- paste0("ind_", seq_len(ngeno))
-	out <- cbind(pos, geno)
-	write.table(out, file, sep="\t", quote=FALSE,
-							row.names=FALSE, col.names=TRUE)
+	cbind(pos, geno)
 }
 file <- "fake-hapmap.txt"
 gzfile <- paste0(file, ".gz")
-createFakeHapMap(file, nrows, ngeno)
+
+# How does writing this file as text compare to writing it in HDF5?
+tbl <- createFakeHapMap(file, nrows, ngeno)
+
+res <- microbenchmark(
+							write.table={ write.table(tbl, file, sep="\t", quote=FALSE,
+																				row.names=FALSE, col.names=TRUE)},
+							hdf5 = {
+								if (file.exists("fake-hapmap.h5")) file.remove("fake-hapmap.h5")
+								fid = H5Fcreate("fake-hapmap.h5")
+								h5write(as.matrix(tbl), fid, 'tbl')
+								H5Fclose(fid)
+						 	},
+							times=3L)
+
+
 gzcmd <- sprintf("gzip -c %s > %s", file, gzfile)
 system(gzcmd)
 
